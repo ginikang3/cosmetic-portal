@@ -1,7 +1,7 @@
 "use client";
 
-import React, { useState, useEffect, useRef } from "react";
-import { Search, ExternalLink, Sparkles, Copy, Check } from "lucide-react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
+import { Search, ExternalLink, Sparkles, Copy } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 
 interface Product {
@@ -15,7 +15,6 @@ interface Product {
   platform: string;
 }
 
-// DB 카테고리(영어)와 버튼 텍스트(스페인어) 매핑
 const categoryMap: { [key: string]: string } = {
   "Tónico": "Toners",
   "Sérum": "Essences & Serums & Ampoules",
@@ -38,58 +37,59 @@ export default function SkinCarePortal() {
   const ITEMS_PER_PAGE = 8;
   const loader = useRef(null);
 
-  useEffect(() => {
-    setProducts([]);
-    setPage(0);
-    setHasMore(true);
-  }, [activeTab, searchQuery]);
-
-  useEffect(() => {
-    fetchProducts();
-  }, [page, activeTab, searchQuery]);
-
-  async function fetchProducts() {
-    if (!hasMore || isLoading) return;
+  // 최적화 1: fetchProducts를 useCallback으로 감싸고 의존성 관리
+  const fetchProducts = useCallback(async (isInitial = false) => {
+    if (isLoading || (!isInitial && !hasMore)) return;
     
     setIsLoading(true);
+    const currentPage = isInitial ? 0 : page;
+
+    // 최적화 2: 필요한 컬럼만 선택 (select("*") 지양)
     let query = supabase
       .from("skincare_portal")
-      .select("*")
+      .select("id, category, brand, product_name, image_url, affiliate_link, coupon_code, platform")
       .order("display_order", { ascending: true });
 
-    // 수정된 필터링 로직: categoryMap을 사용하여 DB의 영어 카테고리로 쿼리
     if (activeTab !== "Todo") {
       const dbCategory = categoryMap[activeTab];
-      if (dbCategory) {
-        query = query.eq("category", dbCategory);
-      }
+      if (dbCategory) query = query.eq("category", dbCategory);
     }
 
     if (searchQuery) {
+      // 최적화 3: 인덱스 효율을 위해 가능한 경우 전방 일치 권장 (여기선 기능 유지를 위해 ilike 유지)
       query = query.or(`product_name.ilike.%${searchQuery}%,brand.ilike.%${searchQuery}%`);
     }
 
-    const start = page * ITEMS_PER_PAGE;
+    const start = currentPage * ITEMS_PER_PAGE;
     const end = start + ITEMS_PER_PAGE - 1;
 
     const { data, error } = await query.range(start, end);
 
-    if (error) {
-      console.error("Error fetching products:", error);
-    } else {
-      if (data) {
-        setProducts(prev => (page === 0 ? data : [...prev, ...data]));
-        if (data.length < ITEMS_PER_PAGE) setHasMore(false);
-      }
+    if (!error && data) {
+      setProducts(prev => (isInitial ? data : [...prev, ...data]));
+      setHasMore(data.length === ITEMS_PER_PAGE);
     }
     setIsLoading(false);
-  }
+  }, [activeTab, searchQuery, page, hasMore, isLoading]);
 
+  // 최적화 4: 탭/검색어 변경 시 상태 초기화 및 즉시 첫 페이지 로드 (중복 호출 방지)
+  useEffect(() => {
+    setProducts([]);
+    setPage(0);
+    setHasMore(true);
+    // page가 0으로 세팅되면서 아래 useEffect가 실행되도록 유도하거나 직접 호출
+  }, [activeTab, searchQuery]);
+
+  useEffect(() => {
+    fetchProducts(page === 0);
+  }, [page, activeTab, searchQuery]);
+
+  // 최적화 5: IntersectionObserver 설정 조정
   useEffect(() => {
     const options = {
       root: null,
-      rootMargin: "20px",
-      threshold: 1.0
+      rootMargin: "100px", // 미리 로딩하기 위해 마진 확대
+      threshold: 0.1
     };
 
     const observer = new IntersectionObserver((entities) => {
@@ -99,13 +99,8 @@ export default function SkinCarePortal() {
       }
     }, options);
 
-    if (loader.current) {
-      observer.observe(loader.current);
-    }
-
-    return () => {
-      if (loader.current) observer.unobserve(loader.current);
-    };
+    if (loader.current) observer.observe(loader.current);
+    return () => { if (loader.current) observer.unobserve(loader.current); };
   }, [hasMore, isLoading]);
 
   const handleCopy = (code: string, id: string) => {
@@ -139,7 +134,6 @@ export default function SkinCarePortal() {
         </div>
 
         <nav className="flex items-center gap-2 px-4 py-3 overflow-x-auto no-scrollbar">
-          {/* 누락되었던 카테고리(Mascarilla, Limpiador, Set)를 배열에 추가 */}
           {["Todo", "Tónico", "Sérum", "Crema", "Protector Solar", "Mascarilla", "Limpiador", "Set"].map((cat) => (
             <button
               key={cat}
@@ -166,9 +160,11 @@ export default function SkinCarePortal() {
                 rel="noopener noreferrer"
                 className="aspect-square bg-gray-50 rounded-xl overflow-hidden relative mb-2 active:scale-95 transition-transform duration-200 block"
               >
+                {/* 최적화 6: 이미지 lazy loading 적용 */}
                 <img
                   src={product.image_url}
                   alt={product.product_name}
+                  loading="lazy"
                   className="w-full h-full object-cover"
                 />
               </a>
@@ -187,11 +183,7 @@ export default function SkinCarePortal() {
                         : "bg-pink-50 text-pink-600 border border-pink-100 active:bg-pink-100"
                     }`}
                   >
-                    {copiedId === product.id ? (
-                      <>¡Copiado!</>
-                    ) : (
-                      <>{product.platform === "NuriGlow" ? "5% Cupón Descuento" : "Copiar Cupón"}</>
-                    )}
+                    {copiedId === product.id ? "¡Copiado!" : (product.platform === "NuriGlow" ? "5% Cupón Descuento" : "Copiar Cupón")}
                     <Copy className="w-3 h-3 ml-1" />
                   </button>
                 )}
