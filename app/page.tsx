@@ -101,14 +101,19 @@ export default function SkinCarePortal() {
         <div className="grid grid-cols-2 gap-x-3 gap-y-4">
           {filteredProducts.map((product) => (
             <div key={product.id} className="flex flex-col bg-white rounded-2xl p-2 border border-gray-100 shadow-sm">
-              {/* 이미지 비율 aspect-square로 압축 */}
-              <div className="aspect-square bg-gray-50 rounded-xl overflow-hidden relative mb-2 active:scale-95 transition-transform duration-200">
+              {/* 이미지 영역 클릭 시 어필리에이트 링크로 이동 기능 추가 */}
+              <a
+                href={product.affiliate_link}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="aspect-square bg-gray-50 rounded-xl overflow-hidden relative mb-2 active:scale-95 transition-transform duration-200 block"
+              >
                 <img
                   src={product.image_url}
                   alt={product.product_name}
                   className="w-full h-full object-cover"
                 />
-              </div>
+              </a>
               <div className="px-1 flex flex-col flex-grow text-center">
                 <p className="text-[10px] text-gray-400 font-bold mb-0.5">{product.brand}</p>
                 <h3 className="text-[11px] font-bold text-gray-800 line-clamp-1 leading-tight mb-2">
