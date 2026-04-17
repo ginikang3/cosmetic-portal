@@ -21,81 +21,91 @@ export default function SkinCarePortal() {
   const [products, setProducts] = useState<Product[]>([]);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   
-  // 무한 스크롤을 위한 상태
   const [page, setPage] = useState(0);
   const [hasMore, setHasMore] = useState(true);
   const [isLoading, setIsLoading] = useState(false);
   const ITEMS_PER_PAGE = 8;
   const loader = useRef(null);
 
+  // 카테고리 매핑 (UI용 스페인어 -> DB용 영어)
+  const categoryMap: { [key: string]: string } = {
+    "Tónico": "Toners",
+    "Sérum": "Essences & Serums & Ampoules",
+    "Crema": "Creams",
+    "Protector Solar": "Sunscreen",
+  };
+
+  // 탭이나 검색어가 바뀌면 상태 초기화
   useEffect(() => {
-    // 탭이나 검색어가 바뀌면 초기화 후 다시 로딩
     setProducts([]);
     setPage(0);
     setHasMore(true);
   }, [activeTab, searchQuery]);
 
+  // 페이지나 필터 변경 시 데이터 호출
   useEffect(() => {
     fetchProducts();
   }, [page, activeTab, searchQuery]);
 
   async function fetchProducts() {
-    if (!hasMore || isLoading) return;
+    // 로딩 중이거나 더 가져올 데이터가 없으면 중단 (단, 첫 페이지 로딩 시엔 hasMore 체크 무시)
+    if (isLoading || (!hasMore && page !== 0)) return;
     
     setIsLoading(true);
-    let query = supabase
-      .from("skincare_portal")
-      .select("*")
-      .order("display_order", { ascending: true });
+    
+    try {
+      let query = supabase
+        .from("skincare_portal")
+        .select("*")
+        .order("display_order", { ascending: true });
 
-    // 카테고리 필터링 (DB 레벨)
-    if (activeTab !== "Todo") {
-      query = query.eq("category", activeTab);
-    }
+      // 카테고리 필터링
+      if (activeTab !== "Todo") {
+        const dbCategory = categoryMap[activeTab] || activeTab;
+        query = query.eq("category", dbCategory);
+      }
 
-    // 검색어 필터링 (DB 레벨)
-    if (searchQuery) {
-      query = query.or(`product_name.ilike.%${searchQuery}%,brand.ilike.%${searchQuery}%`);
-    }
+      // 검색어 필터링
+      if (searchQuery.trim()) {
+        query = query.or(`product_name.ilike.%${searchQuery}%,brand.ilike.%${searchQuery}%`);
+      }
 
-    const start = page * ITEMS_PER_PAGE;
-    const end = start + ITEMS_PER_PAGE - 1;
+      const start = page * ITEMS_PER_PAGE;
+      const end = start + ITEMS_PER_PAGE - 1;
 
-    const { data, error } = await query.range(start, end);
+      const { data, error } = await query.range(start, end);
 
-    if (error) {
-      console.error("Error fetching products:", error);
-    } else {
+      if (error) throw error;
+
       if (data) {
         setProducts(prev => (page === 0 ? data : [...prev, ...data]));
-        if (data.length < ITEMS_PER_PAGE) setHasMore(false);
+        if (data.length < ITEMS_PER_PAGE) {
+          setHasMore(false);
+        }
       }
+    } catch (error) {
+      console.error("Error fetching products:", error);
+    } finally {
+      setIsLoading(false);
     }
-    setIsLoading(false);
   }
 
-  // 스크롤 감지 인터섹션 옵저버
+  // 무한 스크롤 옵저버 설정
   useEffect(() => {
-    const options = {
-      root: null,
-      rootMargin: "20px",
-      threshold: 1.0
-    };
-
-    const observer = new IntersectionObserver((entities) => {
-      const target = entities[0];
-      if (target.isIntersecting && hasMore && !isLoading) {
-        setPage(prev => prev + 1);
-      }
-    }, options);
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting && hasMore && !isLoading) {
+          setPage(prev => prev + 1);
+        }
+      },
+      { threshold: 0.1 }
+    );
 
     if (loader.current) {
       observer.observe(loader.current);
     }
 
-    return () => {
-      if (loader.current) observer.unobserve(loader.current);
-    };
+    return () => observer.disconnect();
   }, [hasMore, isLoading]);
 
   const handleCopy = (code: string, id: string) => {
@@ -199,9 +209,9 @@ export default function SkinCarePortal() {
           ))}
         </div>
         
-        {/* 추가 로딩을 위한 지점 */}
-        <div ref={loader} className="h-10 w-full flex items-center justify-center mt-4">
-          {isLoading && hasMore && <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-pink-500"></div>}
+        {/* 추가 로딩 트리거 영역: h-20으로 확보하여 감지 최적화 */}
+        <div ref={loader} className="h-20 w-full flex items-center justify-center mt-4">
+          {isLoading && hasMore && <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-pink-500"></div>}
         </div>
       </main>
 
