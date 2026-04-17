@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { Search, ExternalLink, Sparkles, Copy, Check } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 
@@ -12,7 +12,7 @@ interface Product {
   image_url: string;
   affiliate_link: string;
   coupon_code: string;
-  platform: string; // 새로 추가한 컬럼
+  platform: string;
 }
 
 export default function SkinCarePortal() {
@@ -20,40 +20,89 @@ export default function SkinCarePortal() {
   const [searchQuery, setSearchQuery] = useState("");
   const [products, setProducts] = useState<Product[]>([]);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  
+  // 무한 스크롤을 위한 상태
+  const [page, setPage] = useState(0);
+  const [hasMore, setHasMore] = useState(true);
+  const [isLoading, setIsLoading] = useState(false);
+  const ITEMS_PER_PAGE = 8;
+  const loader = useRef(null);
 
-  const categories = ["Todo", "Tónico", "Sérum", "Crema", "Protector Solar"];
+  useEffect(() => {
+    // 탭이나 검색어가 바뀌면 초기화 후 다시 로딩
+    setProducts([]);
+    setPage(0);
+    setHasMore(true);
+  }, [activeTab, searchQuery]);
 
   useEffect(() => {
     fetchProducts();
-  }, []);
+  }, [page, activeTab, searchQuery]);
 
   async function fetchProducts() {
-    const { data, error } = await supabase
+    if (!hasMore || isLoading) return;
+    
+    setIsLoading(true);
+    let query = supabase
       .from("skincare_portal")
       .select("*")
-      .order("display_order", { ascending: true })
-      .range(0, 11);
+      .order("display_order", { ascending: true });
+
+    // 카테고리 필터링 (DB 레벨)
+    if (activeTab !== "Todo") {
+      query = query.eq("category", activeTab);
+    }
+
+    // 검색어 필터링 (DB 레벨)
+    if (searchQuery) {
+      query = query.or(`product_name.ilike.%${searchQuery}%,brand.ilike.%${searchQuery}%`);
+    }
+
+    const start = page * ITEMS_PER_PAGE;
+    const end = start + ITEMS_PER_PAGE - 1;
+
+    const { data, error } = await query.range(start, end);
 
     if (error) {
       console.error("Error fetching products:", error);
     } else {
-      setProducts(data || []);
+      if (data) {
+        setProducts(prev => (page === 0 ? data : [...prev, ...data]));
+        if (data.length < ITEMS_PER_PAGE) setHasMore(false);
+      }
     }
+    setIsLoading(false);
   }
+
+  // 스크롤 감지 인터섹션 옵저버
+  useEffect(() => {
+    const options = {
+      root: null,
+      rootMargin: "20px",
+      threshold: 1.0
+    };
+
+    const observer = new IntersectionObserver((entities) => {
+      const target = entities[0];
+      if (target.isIntersecting && hasMore && !isLoading) {
+        setPage(prev => prev + 1);
+      }
+    }, options);
+
+    if (loader.current) {
+      observer.observe(loader.current);
+    }
+
+    return () => {
+      if (loader.current) observer.unobserve(loader.current);
+    };
+  }, [hasMore, isLoading]);
 
   const handleCopy = (code: string, id: string) => {
     navigator.clipboard.writeText(code);
     setCopiedId(id);
     setTimeout(() => setCopiedId(null), 2000);
   };
-
-  const filteredProducts = products.filter((p) => {
-    const matchesTab = activeTab === "Todo" || p.category === activeTab;
-    const matchesSearch =
-      p.product_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      p.brand.toLowerCase().includes(searchQuery.toLowerCase());
-    return matchesTab && matchesSearch;
-  });
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -80,7 +129,7 @@ export default function SkinCarePortal() {
         </div>
 
         <nav className="flex items-center gap-2 px-4 py-3 overflow-x-auto no-scrollbar">
-          {categories.map((cat) => (
+          {["Todo", "Tónico", "Sérum", "Crema", "Protector Solar"].map((cat) => (
             <button
               key={cat}
               onClick={() => setActiveTab(cat)}
@@ -97,11 +146,9 @@ export default function SkinCarePortal() {
       </header>
 
       <main className="p-4">
-        {/* 2*2 최적화: gap-y 4로 줄여서 세로 압축 */}
         <div className="grid grid-cols-2 gap-x-3 gap-y-4">
-          {filteredProducts.map((product) => (
+          {products.map((product) => (
             <div key={product.id} className="flex flex-col bg-white rounded-2xl p-2 border border-gray-100 shadow-sm">
-              {/* 이미지 영역 클릭 시 어필리에이트 링크로 이동 기능 추가 */}
               <a
                 href={product.affiliate_link}
                 target="_blank"
@@ -132,7 +179,6 @@ export default function SkinCarePortal() {
                     {copiedId === product.id ? (
                       <>¡Copiado!</>
                     ) : (
-                      // platform이 NuriGlow일 때 5% 할인 문구 표시
                       <>{product.platform === "NuriGlow" ? "5% Cupón Descuento" : "Copiar Cupón"}</>
                     )}
                     <Copy className="w-3 h-3 ml-1" />
@@ -151,6 +197,11 @@ export default function SkinCarePortal() {
               </div>
             </div>
           ))}
+        </div>
+        
+        {/* 추가 로딩을 위한 지점 */}
+        <div ref={loader} className="h-10 w-full flex items-center justify-center mt-4">
+          {isLoading && hasMore && <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-pink-500"></div>}
         </div>
       </main>
 
