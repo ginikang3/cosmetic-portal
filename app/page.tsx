@@ -15,6 +15,17 @@ interface Product {
   platform: string;
 }
 
+// DB 카테고리(영어)와 버튼 텍스트(스페인어) 매핑
+const categoryMap: { [key: string]: string } = {
+  "Tónico": "Toners",
+  "Sérum": "Essences & Serums & Ampoules",
+  "Crema": "Creams",
+  "Protector Solar": "Sunscreen",
+  "Mascarilla": "Masks",
+  "Limpiador": "Cleansers",
+  "Set": "Set"
+};
+
 export default function SkinCarePortal() {
   const [activeTab, setActiveTab] = useState("Todo");
   const [searchQuery, setSearchQuery] = useState("");
@@ -27,85 +38,74 @@ export default function SkinCarePortal() {
   const ITEMS_PER_PAGE = 8;
   const loader = useRef(null);
 
-  // 카테고리 매핑 (UI용 스페인어 -> DB용 영어)
-  const categoryMap: { [key: string]: string } = {
-    "Tónico": "Toners",
-    "Sérum": "Essences & Serums & Ampoules",
-    "Crema": "Creams",
-    "Protector Solar": "Sunscreen",
-  };
-
-  // 탭이나 검색어가 바뀌면 상태 초기화
   useEffect(() => {
     setProducts([]);
     setPage(0);
     setHasMore(true);
   }, [activeTab, searchQuery]);
 
-  // 페이지나 필터 변경 시 데이터 호출
   useEffect(() => {
     fetchProducts();
   }, [page, activeTab, searchQuery]);
 
   async function fetchProducts() {
-    // 로딩 중이거나 더 가져올 데이터가 없으면 중단 (단, 첫 페이지 로딩 시엔 hasMore 체크 무시)
-    if (isLoading || (!hasMore && page !== 0)) return;
+    if (!hasMore || isLoading) return;
     
     setIsLoading(true);
-    
-    try {
-      let query = supabase
-        .from("skincare_portal")
-        .select("*")
-        .order("display_order", { ascending: true });
+    let query = supabase
+      .from("skincare_portal")
+      .select("*")
+      .order("display_order", { ascending: true });
 
-      // 카테고리 필터링
-      if (activeTab !== "Todo") {
-        const dbCategory = categoryMap[activeTab] || activeTab;
+    // 수정된 필터링 로직: categoryMap을 사용하여 DB의 영어 카테고리로 쿼리
+    if (activeTab !== "Todo") {
+      const dbCategory = categoryMap[activeTab];
+      if (dbCategory) {
         query = query.eq("category", dbCategory);
       }
+    }
 
-      // 검색어 필터링
-      if (searchQuery.trim()) {
-        query = query.or(`product_name.ilike.%${searchQuery}%,brand.ilike.%${searchQuery}%`);
-      }
+    if (searchQuery) {
+      query = query.or(`product_name.ilike.%${searchQuery}%,brand.ilike.%${searchQuery}%`);
+    }
 
-      const start = page * ITEMS_PER_PAGE;
-      const end = start + ITEMS_PER_PAGE - 1;
+    const start = page * ITEMS_PER_PAGE;
+    const end = start + ITEMS_PER_PAGE - 1;
 
-      const { data, error } = await query.range(start, end);
+    const { data, error } = await query.range(start, end);
 
-      if (error) throw error;
-
+    if (error) {
+      console.error("Error fetching products:", error);
+    } else {
       if (data) {
         setProducts(prev => (page === 0 ? data : [...prev, ...data]));
-        if (data.length < ITEMS_PER_PAGE) {
-          setHasMore(false);
-        }
+        if (data.length < ITEMS_PER_PAGE) setHasMore(false);
       }
-    } catch (error) {
-      console.error("Error fetching products:", error);
-    } finally {
-      setIsLoading(false);
     }
+    setIsLoading(false);
   }
 
-  // 무한 스크롤 옵저버 설정
   useEffect(() => {
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries[0].isIntersecting && hasMore && !isLoading) {
-          setPage(prev => prev + 1);
-        }
-      },
-      { threshold: 0.1 }
-    );
+    const options = {
+      root: null,
+      rootMargin: "20px",
+      threshold: 1.0
+    };
+
+    const observer = new IntersectionObserver((entities) => {
+      const target = entities[0];
+      if (target.isIntersecting && hasMore && !isLoading) {
+        setPage(prev => prev + 1);
+      }
+    }, options);
 
     if (loader.current) {
       observer.observe(loader.current);
     }
 
-    return () => observer.disconnect();
+    return () => {
+      if (loader.current) observer.unobserve(loader.current);
+    };
   }, [hasMore, isLoading]);
 
   const handleCopy = (code: string, id: string) => {
@@ -139,7 +139,8 @@ export default function SkinCarePortal() {
         </div>
 
         <nav className="flex items-center gap-2 px-4 py-3 overflow-x-auto no-scrollbar">
-          {["Todo", "Tónico", "Sérum", "Crema", "Protector Solar"].map((cat) => (
+          {/* 누락되었던 카테고리(Mascarilla, Limpiador, Set)를 배열에 추가 */}
+          {["Todo", "Tónico", "Sérum", "Crema", "Protector Solar", "Mascarilla", "Limpiador", "Set"].map((cat) => (
             <button
               key={cat}
               onClick={() => setActiveTab(cat)}
@@ -209,9 +210,8 @@ export default function SkinCarePortal() {
           ))}
         </div>
         
-        {/* 추가 로딩 트리거 영역: h-20으로 확보하여 감지 최적화 */}
-        <div ref={loader} className="h-20 w-full flex items-center justify-center mt-4">
-          {isLoading && hasMore && <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-pink-500"></div>}
+        <div ref={loader} className="h-10 w-full flex items-center justify-center mt-4">
+          {isLoading && hasMore && <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-pink-500"></div>}
         </div>
       </main>
 
