@@ -115,7 +115,7 @@ export default function SkinCarePortal() {
         <div className="px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Sparkles className="w-5 h-5 text-pink-500 fill-pink-500" />
-            <h1 className="text-lg font-bold tracking-tight text-gray-900 italic">Kang's Pick</h1>
+            <h1 className="text-lg font-bold tracking-tight text-gray-900 italic">Cosmetic-Portal</h1>
           </div>
           <span className="text-[10px] bg-pink-100 text-pink-600 px-2 py-0.5 rounded-full font-bold uppercase">Live</span>
         </div>
@@ -126,7 +126,7 @@ export default function SkinCarePortal() {
             <input
               type="text"
               placeholder="Buscar productos..."
-              className="w-full bg-gray-100 border-none rounded-xl py-2.5 pl-10 pr-4 text-sm focus:ring-2 focus:ring-pink-400 transition-all outline-none"
+              className="w-full bg-gray-900 border-none rounded-xl py-2.5 pl-10 pr-4 text-sm focus:ring-2 focus:ring-pink-400 transition-all outline-none"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
             />
