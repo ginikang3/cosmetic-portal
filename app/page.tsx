@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from "react";
 import { Search, ExternalLink, Sparkles, Copy, Check } from "lucide-react";
-import { supabase } from "@/lib/supabase"; // 설정한 경로에 맞게 수정하세요
+import { supabase } from "@/lib/supabase";
 
 interface Product {
   id: string;
@@ -12,15 +12,15 @@ interface Product {
   image_url: string;
   affiliate_link: string;
   coupon_code: string;
+  platform: string; // 새로 추가한 컬럼
 }
 
 export default function SkinCarePortal() {
-  const [activeTab, setActiveTab] = useState("Todo"); // '전체' 대신 스페인어 'Todo'
+  const [activeTab, setActiveTab] = useState("Todo");
   const [searchQuery, setSearchQuery] = useState("");
   const [products, setProducts] = useState<Product[]>([]);
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
-  // 카테고리 스페인어 맵핑
   const categories = ["Todo", "Tónico", "Sérum", "Crema", "Protector Solar"];
 
   useEffect(() => {
@@ -31,7 +31,8 @@ export default function SkinCarePortal() {
     const { data, error } = await supabase
       .from("skincare_portal")
       .select("*")
-      .order("display_order", { ascending: true });
+      .order("display_order", { ascending: true })
+      .range(0, 11);
 
     if (error) {
       console.error("Error fetching products:", error);
@@ -40,7 +41,6 @@ export default function SkinCarePortal() {
     }
   }
 
-  // 복사 기능
   const handleCopy = (code: string, id: string) => {
     navigator.clipboard.writeText(code);
     setCopiedId(id);
@@ -97,10 +97,12 @@ export default function SkinCarePortal() {
       </header>
 
       <main className="p-4">
-        <div className="grid grid-cols-2 gap-x-3 gap-y-8">
+        {/* 2*2 최적화: gap-y 4로 줄여서 세로 압축 */}
+        <div className="grid grid-cols-2 gap-x-3 gap-y-4">
           {filteredProducts.map((product) => (
-            <div key={product.id} className="flex flex-col">
-              <div className="aspect-[4/5] bg-white rounded-2xl overflow-hidden border border-gray-100 shadow-sm relative mb-3 active:scale-95 transition-transform duration-200">
+            <div key={product.id} className="flex flex-col bg-white rounded-2xl p-2 border border-gray-100 shadow-sm">
+              {/* 이미지 비율 aspect-square로 압축 */}
+              <div className="aspect-square bg-gray-50 rounded-xl overflow-hidden relative mb-2 active:scale-95 transition-transform duration-200">
                 <img
                   src={product.image_url}
                   alt={product.product_name}
@@ -108,19 +110,27 @@ export default function SkinCarePortal() {
                 />
               </div>
               <div className="px-1 flex flex-col flex-grow text-center">
-                <p className="text-[11px] text-gray-400 font-bold mb-0.5">{product.brand}</p>
-                <h3 className="text-[13px] font-medium text-gray-800 line-clamp-2 leading-snug mb-3 min-h-[36px]">
+                <p className="text-[10px] text-gray-400 font-bold mb-0.5">{product.brand}</p>
+                <h3 className="text-[11px] font-bold text-gray-800 line-clamp-1 leading-tight mb-2">
                   {product.product_name}
                 </h3>
 
-                {/* 쿠폰 코드 영역 */}
                 {product.coupon_code && (
                   <button
                     onClick={() => handleCopy(product.coupon_code, product.id)}
-                    className="mb-2 flex items-center justify-between w-full bg-pink-50 border border-pink-100 px-2 py-1.5 rounded-lg text-[10px] font-bold text-pink-600 active:bg-pink-100 transition-colors"
+                    className={`mb-2 flex items-center justify-center gap-1 w-full px-2 py-2 rounded-lg text-[10px] font-black transition-colors ${
+                      copiedId === product.id
+                        ? "bg-green-100 text-green-600 border border-green-200"
+                        : "bg-pink-50 text-pink-600 border border-pink-100 active:bg-pink-100"
+                    }`}
                   >
-                    <span>CODE: {product.coupon_code}</span>
-                    {copiedId === product.id ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+                    {copiedId === product.id ? (
+                      <>¡Copiado!</>
+                    ) : (
+                      // platform이 NuriGlow일 때 5% 할인 문구 표시
+                      <>{product.platform === "NuriGlow" ? "5% Cupón Descuento" : "Copiar Cupón"}</>
+                    )}
+                    <Copy className="w-3 h-3 ml-1" />
                   </button>
                 )}
                 
@@ -128,22 +138,15 @@ export default function SkinCarePortal() {
                   href={product.affiliate_link}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="mt-auto flex items-center justify-center gap-2 w-full bg-gray-900 text-white py-3 rounded-xl text-[12px] font-black active:bg-pink-500 transition-colors"
+                  className="mt-auto flex items-center justify-center gap-1 w-full bg-gray-900 text-white py-2.5 rounded-xl text-[11px] font-black active:bg-pink-500 transition-colors"
                 >
                   Comprar
-                  <ExternalLink className="w-3.5 h-3.5" />
+                  <ExternalLink className="w-3 h-3" />
                 </a>
               </div>
             </div>
           ))}
         </div>
-
-        {filteredProducts.length === 0 && (
-          <div className="flex flex-col items-center justify-center py-40">
-            <Search className="w-10 h-10 mb-3 text-gray-200" />
-            <p className="text-sm font-bold text-gray-400">No se encontraron productos.</p>
-          </div>
-        )}
       </main>
 
       <style jsx global>{`
