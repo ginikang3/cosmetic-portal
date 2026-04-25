@@ -1,270 +1,187 @@
 "use client";
 
-import React, { useState, useEffect, useRef, useCallback } from "react";
-import { Search, ExternalLink, Sparkles, Copy, Tag } from "lucide-react";
+import React, { useState, useCallback } from "react";
+import { Sparkles, Check, Copy, RefreshCw, ShoppingCart, ChevronRight } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 
-interface Product {
-  id: string;
-  category: string;
-  brand: string;
-  product_name: string;
-  image_url: string;
-  affiliate_link: string;
-  coupon_code: string;
-  platform: string;
-  concern: string[]; // 추가된 필드
-}
+// DB 태그와 매칭되는 확장된 질문 리스트
+const questions = [
+  { id: "여드름", text: "¿Tienes brotes o acné?", sub: "여드름이나 트러블이 자주 올라오나요?" },
+  { id: "진정", text: "¿Tu piel se irrita fácilmente?", sub: "외부 자극에 피부가 금방 붉어지나요?" },
+  { id: "건조", text: "¿Sientes la piel tirante?", sub: "세안 후나 일상에서 피부 당김이 심한가요?" },
+  { id: "보습", text: "¿Buscas una hidratación profunda?", sub: "강력한 수분 공급과 보습을 원하시나요?" },
+  { id: "탄력", text: "¿Te preocupa la flacidez?", sub: "피부 탄력이 떨어지고 처지는 게 고민인가요?" },
+  { id: "모공", text: "¿Quieres minimizar tus poros?", sub: "넓어진 모공과 피부 요철이 신경 쓰이시나요?" },
+  { id: "미백", text: "¿Deseas un tono más uniforme?", sub: "얼룩덜룩한 피부톤을 맑게 개선하고 싶나요?" },
+  { id: "생기", text: "¿Tu piel luce opaca y cansada?", sub: "피부가 푸석하고 생기가 없어 보이나요?" },
+  { id: "예민", text: "¿Tienes piel reactiva o sensible?", sub: "화장품을 바꿀 때 피부가 민감하게 반응하나요?" },
+  { id: "장벽", text: "¿Sientes la barrera de tu piel débil?", sub: "피부 장벽이 무너져 쉽게 거칠어지나요?" }
+];
 
-const categoryMap: { [key: string]: string } = {
-  "Tónico": "Toners",
-  "Sérum": "Essences & Serums & Ampoules",
-  "Crema": "Creams",
-  "Protector Solar": "Sunscreen",
-  "Mascarilla": "Masks",
-  "Limpiador": "Cleansers",
-  "Set": "Set"
-};
-
-// 피부 고민 매핑 (UI용 스페인어 : DB용 한국어)
-const concernMap: { [key: string]: string } = {
-  "Acné": "여드름",
-  "Calmante": "진정",
-  "Hidratación": "건조",
-  "Elasticidad": "탄력",
-  "Brillo": "미백",
-  "Sensible": "예민"
-};
-
-export default function SkinCarePortal() {
-  const [activeTab, setActiveTab] = useState("Todo");
-  const [activeConcern, setActiveConcern] = useState<string | null>(null); // 피부 고민 상태 추가
-  const [searchQuery, setSearchQuery] = useState("");
-  const [products, setProducts] = useState<Product[]>([]);
-  const [copiedId, setCopiedId] = useState<string | null>(null);
-  
-  const [page, setPage] = useState(0);
-  const [hasMore, setHasMore] = useState(true);
+export default function FullSkinQuiz() {
+  const [step, setStep] = useState(0); 
+  const [selectedConcerns, setSelectedConcerns] = useState<string[]>([]);
+  const [recommendedProducts, setRecommendedProducts] = useState<any[]>([]);
+  const [isCopied, setIsCopied] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  const ITEMS_PER_PAGE = 8;
-  const loader = useRef(null);
 
-  const fetchProducts = useCallback(async (isInitial = false) => {
-    if (isLoading || (!isInitial && !hasMore)) return;
-    
+  const fetchResults = async (concerns: string[]) => {
     setIsLoading(true);
-    const currentPage = isInitial ? 0 : page;
-
-    let query = supabase
-      .from("skincare_portal")
-      .select("id, category, brand, product_name, image_url, affiliate_link, coupon_code, platform, concern")
-      .order("display_order", { ascending: true });
-
-    // 1. 카테고리 필터
-    if (activeTab !== "Todo") {
-      const dbCategory = categoryMap[activeTab];
-      if (dbCategory) query = query.eq("category", dbCategory);
+    let query = supabase.from("skincare_portal").select("*");
+    
+    if (concerns.length > 0) {
+      query = query.contains("concern", [concerns[0]]);
     }
-
-    // 2. 피부 고민 필터 (추가된 로직)
-    if (activeConcern) {
-      const dbConcern = concernMap[activeConcern];
-      if (dbConcern) query = query.contains("concern", [dbConcern]);
-    }
-
-    // 3. 검색 필터
-    if (searchQuery) {
-      query = query.or(`product_name.ilike.%${searchQuery}%,brand.ilike.%${searchQuery}%`);
-    }
-
-    const start = currentPage * ITEMS_PER_PAGE;
-    const end = start + ITEMS_PER_PAGE - 1;
-
-    const { data, error } = await query.range(start, end);
-
-    if (!error && data) {
-      setProducts(prev => (isInitial ? data : [...prev, ...data]));
-      setHasMore(data.length === ITEMS_PER_PAGE);
-    }
+    
+    const { data } = await query.limit(4);
+    setRecommendedProducts(data || []);
     setIsLoading(false);
-  }, [activeTab, activeConcern, searchQuery, page, hasMore, isLoading]);
+    setStep(questions.length + 1);
+  };
 
-  useEffect(() => {
-    setProducts([]);
-    setPage(0);
-    setHasMore(true);
-  }, [activeTab, activeConcern, searchQuery]);
+  const handleAnswer = (answer: boolean) => {
+    const newConcerns = answer 
+      ? [...selectedConcerns, questions[step - 1].id] 
+      : selectedConcerns;
 
-  useEffect(() => {
-    fetchProducts(page === 0);
-  }, [page, activeTab, activeConcern, searchQuery]);
+    if (answer) setSelectedConcerns(newConcerns);
+    
+    if (step < questions.length) {
+      setStep(step + 1);
+    } else {
+      fetchResults(newConcerns);
+    }
+  };
 
-  useEffect(() => {
-    const options = { root: null, rootMargin: "100px", threshold: 0.1 };
-    const observer = new IntersectionObserver((entities) => {
-      const target = entities[0];
-      if (target.isIntersecting && hasMore && !isLoading) {
-        setPage(prev => prev + 1);
-      }
-    }, options);
-    if (loader.current) observer.observe(loader.current);
-    return () => { if (loader.current) observer.unobserve(loader.current); };
-  }, [hasMore, isLoading]);
-
-  const handleCopy = (code: string, id: string) => {
-    navigator.clipboard.writeText(code);
-    setCopiedId(id);
-    setTimeout(() => setCopiedId(null), 2000);
+  const copyCoupon = () => {
+    navigator.clipboard.writeText("SKINCARE5");
+    setIsCopied(true);
+    setTimeout(() => setIsCopied(false), 2000);
   };
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <header className="sticky top-0 z-50 bg-white/95 backdrop-blur-md border-b border-gray-100">
-        <div className="px-4 py-3 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Sparkles className="w-5 h-5 text-pink-500 fill-pink-500" />
-            <h1 className="text-lg font-bold tracking-tight text-gray-900 italic">Cosmetic-Portal</h1>
+    <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-6 font-sans">
+      
+      {step === 0 && (
+        <div className="text-center animate-in fade-in zoom-in duration-500 max-w-sm">
+          <div className="inline-block p-4 bg-pink-100 rounded-full mb-6">
+            <Sparkles className="w-10 h-10 text-pink-500" />
           </div>
-          <span className="text-[10px] bg-pink-100 text-pink-600 px-2 py-0.5 rounded-full font-bold uppercase">Live</span>
+          <h1 className="text-3xl font-black text-gray-900 mb-4 tracking-tighter">
+            Análisis de Piel <br/>K-Beauty 🇰🇷
+          </h1>
+          <p className="text-gray-500 mb-10 text-sm leading-relaxed">
+            Analiza tu piel con 10 preguntas rápidas <br/>
+            y obtén una rutina personalizada con <br/>
+            <span className="font-bold text-pink-500">5% de descuento extra.</span>
+          </p>
+          <button 
+            onClick={() => setStep(1)}
+            className="w-full bg-black text-white py-4 rounded-2xl font-black text-lg shadow-xl hover:bg-gray-800 active:scale-95 transition-all"
+          >
+            Comenzar Análisis
+          </button>
         </div>
+      )}
 
-        {/* 검색창 */}
-        <div className="px-4 pb-2">
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-            <input
-              type="text"
-              placeholder="Buscar productos..."
-              className="w-full bg-gray-100 border-none rounded-xl py-2.5 pl-10 pr-4 text-sm focus:ring-2 focus:ring-pink-400 transition-all outline-none"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-            />
-          </div>
-        </div>
-
-        {/* 피부 고민 선택 필터 (새로 추가됨) */}
-        <div className="px-4 py-2 flex items-center gap-2 overflow-x-auto no-scrollbar border-t border-gray-50">
-          <span className="text-[11px] font-bold text-gray-400 whitespace-nowrap uppercase flex items-center gap-1">
-            <Tag className="w-3 h-3" /> Piel:
-          </span>
-          {Object.keys(concernMap).map((con) => (
-            <button
-              key={con}
-              onClick={() => setActiveConcern(activeConcern === con ? null : con)}
-              className={`whitespace-nowrap px-3 py-1.5 rounded-lg text-[12px] font-bold transition-all ${
-                activeConcern === con
-                  ? "bg-pink-500 text-white shadow-sm"
-                  : "bg-white text-gray-500 border border-gray-100"
-              }`}
-            >
-              {con}
-            </button>
-          ))}
-        </div>
-
-        {/* 기존 카테고리 탭 */}
-        <nav className="flex items-center gap-2 px-4 py-3 overflow-x-auto no-scrollbar border-t border-gray-50">
-          {["Todo", "Tónico", "Sérum", "Crema", "Protector Solar", "Mascarilla", "Limpiador", "Set"].map((cat) => (
-            <button
-              key={cat}
-              onClick={() => setActiveTab(cat)}
-              className={`whitespace-nowrap px-5 py-2 rounded-full text-[13px] font-bold transition-all ${
-                activeTab === cat
-                  ? "bg-gray-900 text-white shadow-lg"
-                  : "bg-white text-gray-500 border border-gray-200"
-              }`}
-            >
-              {cat}
-            </button>
-          ))}
-        </nav>
-      </header>
-
-      <main className="p-4">
-        {/* 할인 쿠폰 안내 배너 (고민 선택 시 노출) */}
-        {activeConcern && (
-          <div className="mb-6 bg-gradient-to-r from-pink-500 to-rose-400 rounded-2xl p-4 text-white shadow-md animate-in fade-in slide-in-from-top-4">
-            <div className="flex justify-between items-start">
-              <div>
-                <p className="text-[11px] font-black uppercase tracking-wider opacity-90">Oferta Especial</p>
-                <h2 className="text-lg font-black leading-tight">5% DE DESCUENTO ADICIONAL</h2>
-                <p className="text-[12px] font-medium opacity-90">Para tu cuidado de {activeConcern}</p>
-              </div>
-              <div className="bg-white/20 backdrop-blur-sm px-3 py-1 rounded-lg text-sm font-black border border-white/30">
-                SKINCARE5
-              </div>
+      {step > 0 && step <= questions.length && (
+        <div className="w-full max-w-sm animate-in slide-in-from-right-8 duration-300">
+          <div className="mb-10">
+            <div className="flex justify-between items-end mb-3">
+              <span className="text-[10px] font-black text-pink-500 uppercase tracking-[0.2em]">Progreso {step}/10</span>
+              <span className="text-[10px] font-bold text-gray-300">{Math.round((step/10)*100)}%</span>
+            </div>
+            <div className="w-full bg-gray-200 h-1.5 rounded-full overflow-hidden">
+              <div className="bg-pink-500 h-full transition-all duration-500 ease-out" style={{ width: `${(step/10)*100}%` }} />
             </div>
           </div>
-        )}
+          
+          <div className="min-h-[120px]">
+            <h2 className="text-2xl font-black text-gray-900 mb-2 leading-tight">
+              {questions[step - 1].text}
+            </h2>
+            <p className="text-gray-400 text-sm font-medium">{questions[step - 1].sub}</p>
+          </div>
 
-        <div className="grid grid-cols-2 gap-x-3 gap-y-4">
-          {products.map((product) => (
-            <div key={product.id} className="flex flex-col bg-white rounded-2xl p-2 border border-gray-100 shadow-sm relative">
-              {/* 5% 할인 라벨 추가 */}
-              {activeConcern && (
-                <div className="absolute top-3 left-3 z-10 bg-red-500 text-white text-[9px] font-black px-2 py-1 rounded-md shadow-sm">
-                  -5% EXTRA
+          <div className="grid grid-cols-1 gap-4 mt-12">
+            <button 
+              onClick={() => handleAnswer(true)}
+              className="flex items-center justify-between bg-gray-900 text-white p-5 rounded-2xl font-bold hover:bg-black active:scale-95 transition-all"
+            >
+              <span>Sí, me preocupa</span>
+              <Check className="w-5 h-5" />
+            </button>
+            <button 
+              onClick={() => handleAnswer(false)}
+              className="flex items-center justify-between bg-white text-gray-900 border border-gray-200 p-5 rounded-2xl font-bold hover:bg-gray-50 active:scale-95 transition-all"
+            >
+              <span>No es mi caso</span>
+              <ChevronRight className="w-5 h-5 text-gray-300" />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {step > questions.length && (
+        <div className="w-full max-w-md animate-in fade-in duration-700">
+          {isLoading ? (
+            <div className="text-center py-20">
+              <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-pink-500 mx-auto mb-4"></div>
+              <p className="text-gray-500 font-bold">Analizando tus respuestas...</p>
+            </div>
+          ) : (
+            <>
+              <div className="text-center mb-10">
+                <h2 className="text-3xl font-black text-gray-900 mb-2">¡Resultados Listos! ✨</h2>
+                <div className="flex flex-wrap justify-center gap-1 mt-3">
+                  {selectedConcerns.map(c => (
+                    <span key={c} className="text-[10px] bg-pink-100 text-pink-600 px-2 py-1 rounded-md font-bold">#{c}</span>
+                  ))}
                 </div>
-              )}
-              
-              <a
-                href={product.affiliate_link}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="aspect-square bg-gray-50 rounded-xl overflow-hidden relative mb-2 active:scale-95 transition-transform duration-200 block"
-              >
-                <img
-                  src={product.image_url}
-                  alt={product.product_name}
-                  loading="lazy"
-                  className="w-full h-full object-cover"
-                />
-              </a>
-              <div className="px-1 flex flex-col flex-grow text-center">
-                <p className="text-[10px] text-gray-400 font-bold mb-0.5">{product.brand}</p>
-                <h3 className="text-[11px] font-bold text-gray-800 line-clamp-1 leading-tight mb-2">
-                  {product.product_name}
-                </h3>
-
-                {product.coupon_code && (
-                  <button
-                    onClick={() => handleCopy(product.coupon_code, product.id)}
-                    className={`mb-2 flex items-center justify-center gap-1 w-full px-2 py-2 rounded-lg text-[10px] font-black transition-colors ${
-                      copiedId === product.id
-                        ? "bg-green-100 text-green-600 border border-green-200"
-                        : "bg-pink-50 text-pink-600 border border-pink-100 active:bg-pink-100"
-                    }`}
-                  >
-                    {copiedId === product.id ? "¡Copiado!" : "Cupón 5% OFF"}
-                    <Copy className="w-3 h-3 ml-1" />
-                  </button>
-                )}
-                
-                <a
-                  href={product.affiliate_link}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="mt-auto flex items-center justify-center gap-1 w-full bg-gray-900 text-white py-2.5 rounded-xl text-[11px] font-black active:bg-pink-500 transition-colors"
-                >
-                  Comprar
-                  <ExternalLink className="w-3 h-3" />
-                </a>
               </div>
-            </div>
-          ))}
-        </div>
-        
-        {/* 로더 */}
-        <div ref={loader} className="h-10 w-full flex items-center justify-center mt-4">
-          {isLoading && hasMore && <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-pink-500"></div>}
-          {!hasMore && products.length > 0 && <p className="text-[10px] text-gray-300 font-bold uppercase">Fin de la lista</p>}
-        </div>
-      </main>
 
-      <style jsx global>{`
-        .no-scrollbar::-webkit-scrollbar { display: none; }
-        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
-      `}</style>
+              <div className="grid grid-cols-2 gap-3 mb-10">
+                {recommendedProducts.map((product) => (
+                  <div key={product.id} className="bg-white p-3 rounded-2xl border border-gray-100 shadow-sm flex flex-col">
+                    <img src={product.image_url} className="w-full aspect-square object-cover rounded-xl mb-3" alt="" />
+                    <p className="text-[9px] font-bold text-gray-400 uppercase tracking-tighter">{product.brand}</p>
+                    <h3 className="text-[11px] font-bold text-gray-800 line-clamp-2 leading-tight mb-3 h-8">{product.product_name}</h3>
+                    <a 
+                      href={product.affiliate_link}
+                      target="_blank"
+                      className="mt-auto w-full bg-gray-900 text-white py-2 rounded-lg text-[10px] font-black text-center flex items-center justify-center gap-1"
+                    >
+                      Comprar <ShoppingCart className="w-3 h-3" />
+                    </a>
+                  </div>
+                ))}
+              </div>
+
+              <div className="bg-gradient-to-br from-gray-900 to-gray-800 rounded-3xl p-6 text-center relative mb-8 shadow-2xl">
+                <p className="text-pink-400 font-black text-[10px] mb-2 uppercase tracking-[0.2em]">Cupón de Regalo</p>
+                <h3 className="text-3xl font-black text-white mb-5">5% OFF</h3>
+                <button 
+                  onClick={copyCoupon}
+                  className={`w-full flex items-center justify-center gap-2 py-4 rounded-xl font-black transition-all ${
+                    isCopied ? "bg-green-500 text-white" : "bg-white text-gray-900"
+                  }`}
+                >
+                  {isCopied ? "¡CÓDIGO COPIADO!" : "SKINCARE5"}
+                  <Copy className="w-4 h-4" />
+                </button>
+                <p className="text-[10px] text-gray-400 mt-4">Aplica este código en el carrito de compras.</p>
+              </div>
+
+              <button 
+                onClick={() => {setStep(0); setSelectedConcerns([]);}}
+                className="w-full flex items-center justify-center gap-2 text-gray-400 font-bold text-xs"
+              >
+                <RefreshCw className="w-3 h-3" /> Reintentar Test
+              </button>
+            </>
+          )}
+        </div>
+      )}
     </div>
   );
 }
