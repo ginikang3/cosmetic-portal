@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import { Search, ExternalLink, Sparkles, Copy } from "lucide-react";
+import { Search, ExternalLink, Sparkles, Copy, Tag } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 
 interface Product {
@@ -13,6 +13,7 @@ interface Product {
   affiliate_link: string;
   coupon_code: string;
   platform: string;
+  concern: string[]; // 추가된 필드
 }
 
 const categoryMap: { [key: string]: string } = {
@@ -25,8 +26,19 @@ const categoryMap: { [key: string]: string } = {
   "Set": "Set"
 };
 
+// 피부 고민 매핑 (UI용 스페인어 : DB용 한국어)
+const concernMap: { [key: string]: string } = {
+  "Acné": "여드름",
+  "Calmante": "진정",
+  "Hidratación": "건조",
+  "Elasticidad": "탄력",
+  "Brillo": "미백",
+  "Sensible": "예민"
+};
+
 export default function SkinCarePortal() {
   const [activeTab, setActiveTab] = useState("Todo");
+  const [activeConcern, setActiveConcern] = useState<string | null>(null); // 피부 고민 상태 추가
   const [searchQuery, setSearchQuery] = useState("");
   const [products, setProducts] = useState<Product[]>([]);
   const [copiedId, setCopiedId] = useState<string | null>(null);
@@ -37,26 +49,31 @@ export default function SkinCarePortal() {
   const ITEMS_PER_PAGE = 8;
   const loader = useRef(null);
 
-  // 최적화 1: fetchProducts를 useCallback으로 감싸고 의존성 관리
   const fetchProducts = useCallback(async (isInitial = false) => {
     if (isLoading || (!isInitial && !hasMore)) return;
     
     setIsLoading(true);
     const currentPage = isInitial ? 0 : page;
 
-    // 최적화 2: 필요한 컬럼만 선택 (select("*") 지양)
     let query = supabase
       .from("skincare_portal")
-      .select("id, category, brand, product_name, image_url, affiliate_link, coupon_code, platform")
+      .select("id, category, brand, product_name, image_url, affiliate_link, coupon_code, platform, concern")
       .order("display_order", { ascending: true });
 
+    // 1. 카테고리 필터
     if (activeTab !== "Todo") {
       const dbCategory = categoryMap[activeTab];
       if (dbCategory) query = query.eq("category", dbCategory);
     }
 
+    // 2. 피부 고민 필터 (추가된 로직)
+    if (activeConcern) {
+      const dbConcern = concernMap[activeConcern];
+      if (dbConcern) query = query.contains("concern", [dbConcern]);
+    }
+
+    // 3. 검색 필터
     if (searchQuery) {
-      // 최적화 3: 인덱스 효율을 위해 가능한 경우 전방 일치 권장 (여기선 기능 유지를 위해 ilike 유지)
       query = query.or(`product_name.ilike.%${searchQuery}%,brand.ilike.%${searchQuery}%`);
     }
 
@@ -70,35 +87,26 @@ export default function SkinCarePortal() {
       setHasMore(data.length === ITEMS_PER_PAGE);
     }
     setIsLoading(false);
-  }, [activeTab, searchQuery, page, hasMore, isLoading]);
+  }, [activeTab, activeConcern, searchQuery, page, hasMore, isLoading]);
 
-  // 최적화 4: 탭/검색어 변경 시 상태 초기화 및 즉시 첫 페이지 로드 (중복 호출 방지)
   useEffect(() => {
     setProducts([]);
     setPage(0);
     setHasMore(true);
-    // page가 0으로 세팅되면서 아래 useEffect가 실행되도록 유도하거나 직접 호출
-  }, [activeTab, searchQuery]);
+  }, [activeTab, activeConcern, searchQuery]);
 
   useEffect(() => {
     fetchProducts(page === 0);
-  }, [page, activeTab, searchQuery]);
+  }, [page, activeTab, activeConcern, searchQuery]);
 
-  // 최적화 5: IntersectionObserver 설정 조정
   useEffect(() => {
-    const options = {
-      root: null,
-      rootMargin: "100px", // 미리 로딩하기 위해 마진 확대
-      threshold: 0.1
-    };
-
+    const options = { root: null, rootMargin: "100px", threshold: 0.1 };
     const observer = new IntersectionObserver((entities) => {
       const target = entities[0];
       if (target.isIntersecting && hasMore && !isLoading) {
         setPage(prev => prev + 1);
       }
     }, options);
-
     if (loader.current) observer.observe(loader.current);
     return () => { if (loader.current) observer.unobserve(loader.current); };
   }, [hasMore, isLoading]);
@@ -120,20 +128,42 @@ export default function SkinCarePortal() {
           <span className="text-[10px] bg-pink-100 text-pink-600 px-2 py-0.5 rounded-full font-bold uppercase">Live</span>
         </div>
 
-        <div className="px-4 pb-1">
+        {/* 검색창 */}
+        <div className="px-4 pb-2">
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
             <input
               type="text"
               placeholder="Buscar productos..."
-              className="w-full bg-gray-900 border-none rounded-xl py-2.5 pl-10 pr-4 text-sm focus:ring-2 focus:ring-pink-400 transition-all outline-none"
+              className="w-full bg-gray-100 border-none rounded-xl py-2.5 pl-10 pr-4 text-sm focus:ring-2 focus:ring-pink-400 transition-all outline-none"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
             />
           </div>
         </div>
 
-        <nav className="flex items-center gap-2 px-4 py-3 overflow-x-auto no-scrollbar">
+        {/* 피부 고민 선택 필터 (새로 추가됨) */}
+        <div className="px-4 py-2 flex items-center gap-2 overflow-x-auto no-scrollbar border-t border-gray-50">
+          <span className="text-[11px] font-bold text-gray-400 whitespace-nowrap uppercase flex items-center gap-1">
+            <Tag className="w-3 h-3" /> Piel:
+          </span>
+          {Object.keys(concernMap).map((con) => (
+            <button
+              key={con}
+              onClick={() => setActiveConcern(activeConcern === con ? null : con)}
+              className={`whitespace-nowrap px-3 py-1.5 rounded-lg text-[12px] font-bold transition-all ${
+                activeConcern === con
+                  ? "bg-pink-500 text-white shadow-sm"
+                  : "bg-white text-gray-500 border border-gray-100"
+              }`}
+            >
+              {con}
+            </button>
+          ))}
+        </div>
+
+        {/* 기존 카테고리 탭 */}
+        <nav className="flex items-center gap-2 px-4 py-3 overflow-x-auto no-scrollbar border-t border-gray-50">
           {["Todo", "Tónico", "Sérum", "Crema", "Protector Solar", "Mascarilla", "Limpiador", "Set"].map((cat) => (
             <button
               key={cat}
@@ -151,16 +181,38 @@ export default function SkinCarePortal() {
       </header>
 
       <main className="p-4">
+        {/* 할인 쿠폰 안내 배너 (고민 선택 시 노출) */}
+        {activeConcern && (
+          <div className="mb-6 bg-gradient-to-r from-pink-500 to-rose-400 rounded-2xl p-4 text-white shadow-md animate-in fade-in slide-in-from-top-4">
+            <div className="flex justify-between items-start">
+              <div>
+                <p className="text-[11px] font-black uppercase tracking-wider opacity-90">Oferta Especial</p>
+                <h2 className="text-lg font-black leading-tight">5% DE DESCUENTO ADICIONAL</h2>
+                <p className="text-[12px] font-medium opacity-90">Para tu cuidado de {activeConcern}</p>
+              </div>
+              <div className="bg-white/20 backdrop-blur-sm px-3 py-1 rounded-lg text-sm font-black border border-white/30">
+                SKINCARE5
+              </div>
+            </div>
+          </div>
+        )}
+
         <div className="grid grid-cols-2 gap-x-3 gap-y-4">
           {products.map((product) => (
-            <div key={product.id} className="flex flex-col bg-white rounded-2xl p-2 border border-gray-100 shadow-sm">
+            <div key={product.id} className="flex flex-col bg-white rounded-2xl p-2 border border-gray-100 shadow-sm relative">
+              {/* 5% 할인 라벨 추가 */}
+              {activeConcern && (
+                <div className="absolute top-3 left-3 z-10 bg-red-500 text-white text-[9px] font-black px-2 py-1 rounded-md shadow-sm">
+                  -5% EXTRA
+                </div>
+              )}
+              
               <a
                 href={product.affiliate_link}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="aspect-square bg-gray-50 rounded-xl overflow-hidden relative mb-2 active:scale-95 transition-transform duration-200 block"
               >
-                {/* 최적화 6: 이미지 lazy loading 적용 */}
                 <img
                   src={product.image_url}
                   alt={product.product_name}
@@ -183,7 +235,7 @@ export default function SkinCarePortal() {
                         : "bg-pink-50 text-pink-600 border border-pink-100 active:bg-pink-100"
                     }`}
                   >
-                    {copiedId === product.id ? "¡Copiado!" : (product.platform === "NuriGlow" ? "5% Cupón Descuento" : "Copiar Cupón")}
+                    {copiedId === product.id ? "¡Copiado!" : "Cupón 5% OFF"}
                     <Copy className="w-3 h-3 ml-1" />
                   </button>
                 )}
@@ -202,8 +254,10 @@ export default function SkinCarePortal() {
           ))}
         </div>
         
+        {/* 로더 */}
         <div ref={loader} className="h-10 w-full flex items-center justify-center mt-4">
           {isLoading && hasMore && <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-pink-500"></div>}
+          {!hasMore && products.length > 0 && <p className="text-[10px] text-gray-300 font-bold uppercase">Fin de la lista</p>}
         </div>
       </main>
 
